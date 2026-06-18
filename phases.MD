@@ -1984,52 +1984,780 @@ git commit -m "chore: initial project setup
 
 
 FASE 3 - DISEÑO DE BASE DE DATOS
-Tabla Users
-id
-telegram_id
-username
-first_name
-language
-is_active
-created_at
-updated_at
-Tabla Chats
-id
-telegram_chat_id
-chat_type
-title
-created_at
-Tabla Messages
-id
-chat_id
-user_id
-role
-content
-tokens
-created_at
-Tabla Conversations
-id
-chat_id
-title
-created_at
-Tabla Personalities
-id
-name
-system_prompt
-temperature
-max_tokens
-Tabla Memories
-id
-user_id
-content
-embedding_id
-importance
-Tabla Documents
-id
-name
-file_path
-status
-created_at
+===============================
+
+## Instrucciones de uso
+
+Esta fase contiene **todo el código** para implementar la capa de base de datos: modelos SQLAlchemy, sesión, esquemas Pydantic, y migraciones.
+
+**Orden de ejecución:**
+1. `3.1` → Actualizar `src/db/models/__init__.py` con Base y mixins
+2. `3.2` → Crear cada modelo en `src/db/models/`
+3. `3.3` → Crear `src/db/session.py`
+4. `3.4` → Crear esquemas Pydantic en `src/models/`
+5. `3.5` → Generar migración inicial con Alembic
+6. `3.6` → Verificar que todo funciona
+
+---
+
+## 3.1 MODELO BASE Y MIXINS
+
+### Actualizar `src/db/models/__init__.py`
+
+Reemplaza el contenido actual con:
+
+```python
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import DateTime, func
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class TimestampMixin:
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class UpdateableMixin(TimestampMixin):
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        default=None,
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=True,
+    )
+
+
+class UUIDMixin:
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        default=lambda: uuid4().hex,
+    )
+```
+
+---
+
+## 3.2 MODELOS SQLALCHEMY
+
+### Crear `src/db/models/user.py`
+
+```python
+from sqlalchemy import BigInteger, Boolean, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import UUIDMixin, UpdateableMixin, Base
+
+
+class User(UUIDMixin, UpdateableMixin, Base):
+    __tablename__ = "users"
+
+    telegram_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, index=True, nullable=False
+    )
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    language: Mapped[str] = mapped_column(String(10), default="es", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    messages = relationship("Message", back_populates="user", lazy="selectin")
+    memories = relationship("Memory", back_populates="user", lazy="selectin")
+    documents = relationship("Document", back_populates="user", lazy="selectin")
+```
+
+### Crear `src/db/models/chat.py`
+
+```python
+from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import TimestampMixin, UUIDMixin, Base
+
+
+class Chat(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "chats"
+
+    telegram_chat_id: Mapped[int] = mapped_column(
+        BigInteger, unique=True, index=True, nullable=False
+    )
+    chat_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    personality_id: Mapped[str | None] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("personalities.id"), nullable=True
+    )
+
+    messages = relationship("Message", back_populates="chat", lazy="selectin")
+    conversations = relationship("Conversation", back_populates="chat", lazy="selectin")
+    personality = relationship("Personality", back_populates="chats", lazy="selectin")
+    documents = relationship("Document", back_populates="chat", lazy="selectin")
+```
+
+### Crear `src/db/models/message.py`
+
+```python
+from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import TimestampMixin, UUIDMixin, Base
+
+
+class Message(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "messages"
+
+    chat_id: Mapped[str] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("chats.id"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("users.id"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    chat = relationship("Chat", back_populates="messages", lazy="selectin")
+    user = relationship("User", back_populates="messages", lazy="selectin")
+```
+
+### Crear `src/db/models/conversation.py`
+
+```python
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import TimestampMixin, UUIDMixin, Base
+
+
+class Conversation(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "conversations"
+
+    chat_id: Mapped[str] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("chats.id"), nullable=False, index=True
+    )
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+    chat = relationship("Chat", back_populates="conversations", lazy="selectin")
+```
+
+### Crear `src/db/models/personality.py`
+
+```python
+from sqlalchemy import Boolean, Float, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import UpdateableMixin, UUIDMixin, Base
+
+
+class Personality(UUIDMixin, UpdateableMixin, Base):
+    __tablename__ = "personalities"
+
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    temperature: Mapped[float] = mapped_column(Float, default=0.7, nullable=False)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=2048, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    chats = relationship("Chat", back_populates="personality", lazy="selectin")
+```
+
+### Crear `src/db/models/memory.py`
+
+```python
+from sqlalchemy import Float, ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import TimestampMixin, UUIDMixin, Base
+
+
+class Memory(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "memories"
+
+    user_id: Mapped[str] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("users.id"), nullable=False, index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True
+    )
+    importance: Mapped[float] = mapped_column(Float, default=0.5, nullable=False)
+
+    user = relationship("User", back_populates="memories", lazy="selectin")
+```
+
+### Crear `src/db/models/document.py`
+
+```python
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from . import TimestampMixin, UUIDMixin, Base
+
+
+class Document(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "documents"
+
+    chat_id: Mapped[str | None] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("chats.id"), nullable=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        UUIDMixin.id.type, ForeignKey("users.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False
+    )
+
+    chat = relationship("Chat", back_populates="documents", lazy="selectin")
+    user = relationship("User", back_populates="documents", lazy="selectin")
+```
+
+---
+
+## 3.3 SESIÓN DE BASE DE DATOS
+
+### Crear `src/db/session.py`
+
+```python
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+
+from src.core.config import settings
+
+engine = create_async_engine(
+    settings.database_url,
+    echo=settings.is_development,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+)
+
+async_session_factory = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
+
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session_factory() as session:
+        yield session
+
+
+async def init_db() -> None:
+    """Crea todas las tablas (útil para desarrollo, no para producción)."""
+    from src.db.models import Base
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def close_db() -> None:
+    await engine.dispose()
+```
+
+---
+
+## 3.4 ESQUEMAS PYDANTIC
+
+### Actualizar `src/models/__init__.py`
+
+```python
+"""
+Schemas Pydantic para la API y servicios.
+
+Cada modelo tiene:
+- CreateSchema: para crear (sin id, sin timestamps)
+- UpdateSchema: para actualizar (todos opcionales)
+- ResponseSchema: para devolver al cliente
+"""
+
+from src.models.user import (
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
+from src.models.chat import ChatCreate, ChatResponse, ChatUpdate
+from src.models.message import (
+    MessageCreate,
+    MessageResponse,
+)
+from src.models.personality import (
+    PersonalityCreate,
+    PersonalityResponse,
+    PersonalityUpdate,
+)
+from src.models.document import DocumentCreate, DocumentResponse
+from src.models.memory import MemoryCreate, MemoryResponse
+
+__all__ = [
+    "UserCreate", "UserResponse", "UserUpdate",
+    "ChatCreate", "ChatResponse", "ChatUpdate",
+    "MessageCreate", "MessageResponse",
+    "PersonalityCreate", "PersonalityResponse", "PersonalityUpdate",
+    "DocumentCreate", "DocumentResponse",
+    "MemoryCreate", "MemoryResponse",
+]
+```
+
+### Crear `src/models/user.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class UserBase(BaseModel):
+    telegram_id: int
+    username: str | None = None
+    first_name: str | None = None
+    language: str = "es"
+    is_active: bool = True
+
+
+class UserCreate(UserBase):
+    pass
+
+
+class UserUpdate(BaseModel):
+    username: str | None = None
+    first_name: str | None = None
+    language: str | None = None
+    is_active: bool | None = None
+
+
+class UserResponse(UserBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime | None = None
+```
+
+### Crear `src/models/chat.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ChatBase(BaseModel):
+    telegram_chat_id: int
+    chat_type: str
+    title: str | None = None
+    personality_id: str | None = None
+
+
+class ChatCreate(ChatBase):
+    pass
+
+
+class ChatUpdate(BaseModel):
+    title: str | None = None
+    personality_id: str | None = None
+
+
+class ChatResponse(ChatBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+```
+
+### Crear `src/models/message.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class MessageBase(BaseModel):
+    chat_id: str
+    user_id: str
+    role: str
+    content: str
+    tokens: int | None = None
+
+
+class MessageCreate(MessageBase):
+    pass
+
+
+class MessageResponse(MessageBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+```
+
+### Crear `src/models/personality.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class PersonalityBase(BaseModel):
+    name: str
+    system_prompt: str
+    temperature: float = 0.7
+    max_tokens: int = 2048
+    is_active: bool = True
+
+
+class PersonalityCreate(PersonalityBase):
+    pass
+
+
+class PersonalityUpdate(BaseModel):
+    name: str | None = None
+    system_prompt: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    is_active: bool | None = None
+
+
+class PersonalityResponse(PersonalityBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+    updated_at: datetime | None = None
+```
+
+### Crear `src/models/memory.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class MemoryBase(BaseModel):
+    user_id: str
+    content: str
+    embedding_id: str | None = None
+    importance: float = 0.5
+
+
+class MemoryCreate(MemoryBase):
+    pass
+
+
+class MemoryResponse(MemoryBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    created_at: datetime
+```
+
+### Crear `src/models/document.py`
+
+```python
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class DocumentBase(BaseModel):
+    chat_id: str | None = None
+    user_id: str
+    name: str
+    status: str = "pending"
+
+
+class DocumentCreate(DocumentBase):
+    file_path: str | None = None
+
+
+class DocumentResponse(DocumentBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    file_path: str | None = None
+    created_at: datetime
+```
+
+---
+
+## 3.5 MIGRACIÓN ALEMBIC
+
+### Paso 1: Registrar los modelos en `src/db/models/__init__.py`
+
+Agrega estas líneas **al final** del archivo `src/db/models/__init__.py` (después de la clase Base y mixins):
+
+```python
+# Registrar modelos para que Alembic los detecte automáticamente
+from src.db.models.user import User
+from src.db.models.chat import Chat
+from src.db.models.message import Message
+from src.db.models.conversation import Conversation
+from src.db.models.personality import Personality
+from src.db.models.memory import Memory
+from src.db.models.document import Document
+
+__all__ = [
+    "Base",
+    "TimestampMixin",
+    "UpdateableMixin",
+    "UUIDMixin",
+    "User",
+    "Chat",
+    "Message",
+    "Conversation",
+    "Personality",
+    "Memory",
+    "Document",
+]
+```
+
+### Paso 2: Verificar que alembic.ini apunte al lugar correcto
+
+El archivo `src/db/migrations/alembic.ini` ya debe tener:
+
+```ini
+sqlalchemy.url = postgresql+asyncpg://botuser:botpass@localhost:5432/telegram_bot
+```
+
+### Paso 3: Verificar que `env.py` importe Base correctamente
+
+El archivo `src/db/migrations/env.py` ya debe tener:
+
+```python
+from src.db.models import Base
+```
+
+### Paso 4: Si la migración es la primera vez, ajustar el `script_location`
+
+Abre `src/db/migrations/alembic.ini` y asegúrate de que apunte al directorio correcto:
+
+```ini
+script_location = src/db/migrations
+```
+
+Y que `prepend_sys_path` incluya la raíz del proyecto:
+
+```ini
+prepend_sys_path = ../..
+```
+
+(Esto es necesario porque el `.ini` está en `src/db/migrations/` y el proyecto en la raíz)
+
+### Paso 5: Generar la migración inicial
+
+```bash
+# Desde la raíz del proyecto
+uv run alembic -c src/db/migrations/alembic.ini revision --autogenerate -m "initial_tables"
+```
+
+Esto debe generar un archivo en `src/db/migrations/versions/` con la migración.
+
+### Paso 6: Revisar la migración generada
+
+Abre el archivo generado en `src/db/migrations/versions/` y verifica que contenga:
+
+- `op.create_table("users", ...)` con todas las columnas
+- `op.create_table("chats", ...)` con FK a `personalities`
+- `op.create_table("messages", ...)` con FK a `chats` y `users`
+- `op.create_table("conversations", ...)` con FK a `chats`
+- `op.create_table("personalities", ...)`
+- `op.create_table("memories", ...)` con FK a `users`
+- `op.create_table("documents", ...)` con FK a `chats` y `users`
+
+Si falta alguna FK o columna, corrígelo manualmente.
+
+### Paso 7: Aplicar la migración
+
+```bash
+uv run alembic -c src/db/migrations/alembic.ini upgrade head
+```
+
+---
+
+## 3.6 MODELOS DE NEGOCIO (Opcional, para servicios)
+
+### Crear `src/services/__init__.py`
+
+```python
+# Servicios de negocio (se implementarán en fases posteriores)
+```
+
+No es necesario modificar este archivo ahora.
+
+---
+
+## 3.7 DIAGRAMA ENTIDAD-RELACIÓN
+
+```
+┌───────────────────┐     ┌─────────────────────┐
+│      users        │     │    personalities     │
+├───────────────────┤     ├─────────────────────┤
+│ id (PK)           │     │ id (PK)              │
+│ telegram_id (UQ)  │     │ name (UQ)            │
+│ username          │     │ system_prompt        │
+│ first_name        │     │ temperature          │
+│ language          │     │ max_tokens           │
+│ is_active         │     │ is_active            │
+│ created_at        │     │ created_at           │
+│ updated_at        │     │ updated_at           │
+└────────┬──────────┘     └──────────┬──────────┘
+         │                           │
+         │ 1:N                       │ 1:N
+         ▼                           ▼
+┌───────────────────┐     ┌─────────────────────┐
+│     messages      │     │       chats          │
+├───────────────────┤     ├─────────────────────┤
+│ id (PK)           │     │ id (PK)              │
+│ chat_id (FK) ─────┼──▶  │ telegram_chat_id(UQ) │
+│ user_id (FK) ─────┼──▶  │ chat_type            │
+│ role              │     │ title                │
+│ content           │     │ personality_id (FK)──┼──▶
+│ tokens            │     │ created_at           │
+│ created_at        │     └────────┬──────────┘   │
+└───────────────────┘              │              │
+                                   │ 1:N          │
+                                   ▼              │
+┌───────────────────┐              │              │
+│  conversations    │              │              │
+├───────────────────┤              │              │
+│ id (PK)           │              │              │
+│ chat_id (FK) ─────┼──────────────┘              │
+│ title             │                             │
+│ created_at        │                             │
+└───────────────────┘                             │
+                                                  │
+┌───────────────────┐     ┌──────────────────────┐│
+│     memories      │     │      documents       ││
+├───────────────────┤     ├──────────────────────┤│
+│ id (PK)           │     │ id (PK)              ││
+│ user_id (FK) ─────┼──▶  │ chat_id (FK) ────────┼┘
+│ content           │     │ user_id (FK) ────────┼──▶
+│ embedding_id (UQ) │     │ name                 │
+│ importance        │     │ file_path            │
+│ created_at        │     │ status               │
+└───────────────────┘     │ created_at           │
+                          └──────────────────────┘
+```
+
+---
+
+## 3.8 VERIFICACIÓN
+
+### Probar que los modelos se importan correctamente
+
+```bash
+uv run python -c "
+from src.db.models import Base, User, Chat, Message, Conversation, Personality, Memory, Document
+print('✓ Modelos importados correctamente')
+print(f'Tablas: {Base.metadata.tables.keys()}')
+"
+```
+
+### Probar esquemas Pydantic
+
+```bash
+uv run python -c "
+from src.models import UserCreate, UserResponse
+from datetime import datetime
+
+# Crear
+data = UserCreate(telegram_id=123456789, username='test')
+print(f'✓ UserCreate: {data.model_dump()}')
+
+# Response (from_attributes)
+resp = UserResponse(
+    id='abc123',
+    telegram_id=123456789,
+    username='test',
+    language='es',
+    is_active=True,
+    created_at=datetime.now(),
+    updated_at=None,
+)
+print(f'✓ UserResponse: {resp.model_dump()}')
+"
+```
+
+### Verificar que Alembic detecta los modelos
+
+```bash
+uv run alembic -c src/db/migrations/alembic.ini revision --autogenerate -m "test_detect" --sql
+```
+
+Si todo está correcto, verás las sentencias SQL de creación de tablas. Luego borra el archivo de migración de prueba:
+
+```bash
+# Eliminar el archivo de migración de prueba creado
+Remove-Item src/db/migrations/versions/*test_detect*
+```
+
+---
+
+## 3.9 SEED DATA (Opcional)
+
+### Crear `scripts/seed.py`
+
+```python
+"""Script para poblar la base de datos con datos iniciales."""
+
+import asyncio
+
+from src.core.config import settings
+from src.db.models import Personality
+from src.db.session import async_session_factory, init_db
+
+
+async def seed() -> None:
+    await init_db()
+
+    async with async_session_factory() as session:
+        # Personalidad por defecto
+        default = Personality(
+            name="default",
+            system_prompt=(
+                "Eres un asistente técnico experto en programación. "
+                "Respondes de forma clara, directa y profesional. "
+                "Usas el idioma del usuario."
+            ),
+            temperature=0.7,
+            max_tokens=2048,
+            is_active=True,
+        )
+        session.add(default)
+
+        await session.commit()
+        print("✓ Seed completado: personalidad 'default' creada")
+
+
+if __name__ == "__main__":
+    asyncio.run(seed())
+```
+
+Para ejecutarlo:
+
+```bash
+mkdir -p scripts
+# (crea el archivo scripts/seed.py con el contenido de arriba)
+uv run python scripts/seed.py
+```
+
 
 FASE 4 - BOT TELEGRAM
 Crear Bot

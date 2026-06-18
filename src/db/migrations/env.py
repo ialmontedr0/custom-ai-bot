@@ -1,9 +1,13 @@
 import asyncio
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 from typing import Any
 
 from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
+
+sys.path.insert(0, str(Path(__file__).parents[3]))
 
 from src.core.config import settings
 from src.db.models import Base
@@ -13,7 +17,6 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-
 
 def run_migrations_offline() -> None:
     url = settings.database_url
