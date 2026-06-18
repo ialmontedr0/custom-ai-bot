@@ -4,11 +4,10 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health():
-    return {"status": "OK", "service": "telegram-ai-bot"}
+async def health() -> dict[str, str]:
+    return {"status": "ok", "service": "telegram-ai-bot"}
 
 
 @router.get("/ready")
-async def ready():
-    # En el fututro: verificar DB, Redis, Qdrant
+async def ready() -> dict[str, str]:
     return {"status": "ready"}

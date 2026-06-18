@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
@@ -11,14 +12,9 @@ logger = structlog.get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    Maneja startup y shutdown de la aplicacion.
-    """
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Inicio de la aplicacion.")
-    # Aqui se inicializaran DB pool, redis, Qdrant, Aiogram, etc.
     yield
-    # Aqui se cerraran conexiones
     logger.info("Cierre de la aplicacion")
 
 

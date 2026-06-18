@@ -1,4 +1,4 @@
-yaml services:
+services:
   api:
     build:
       context: ..
@@ -76,9 +76,9 @@ yaml services:
     ports:
       - "8001:8001"
     volumes:
-      - vllm_model:/root/.cache/huggingface
+      - vllm_models:/root/.cache/huggingface
     environment:
-      HUGGING_FACE_HUB_TOKEN: "" # Opcional para modelos gated
+      HUGGING_FACE_HUB_TOKEN: ""
     command:
       - "--model"
       - "Qwen/Qwen2.5-7B-Instruct"
@@ -89,16 +89,17 @@ yaml services:
       - "--gpu-memory-utilization"
       - "0.90"
       - "--trust-remote-code"
-     #  deploy:
-      # resources:
-        # devices:
-          # - driver: nvidia
-            # count: 1
-            # capabilities: [gpu] 
     networks:
       - internal
     restart: unless-stopped
-    # Comentar la seccion deploy si no tengo GPU
+    # Descomentar deploy si tienes GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
 
   nginx:
     image: nginx:alpine
@@ -121,7 +122,7 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
-  vllm_data:
+  vllm_models:
 
 networks:
   internal:
