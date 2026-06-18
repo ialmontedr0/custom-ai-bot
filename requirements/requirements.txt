@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+aiogram
+sqlalchemy
+alembic
+psycopg
+redis
+pydantic
+python-dotenv
+transformers
+torch
+sentence-transformers
+qdrant-client
+httpx
+structlog
