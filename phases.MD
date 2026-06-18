@@ -903,20 +903,1085 @@ telegram-ai-bot/
 
 **Veredicto:** vLLM es la mejor opción para producción por su rendimiento con PagedAttention y batching dinámico. Ollama es mejor para desarrollo local rápido.
 
-Ahora desarrollaremos la siguiente fase completa y avanzada por favor:
-
 FASE 2 - INFRAESTRUCTURA
-Crear repositorio
+========================
 
-Configurar entorno
+## Instrucciones de uso
 
-Dependencias principales
+Esta fase contiene **todo el código y comandos** que necesitas ejecutar manualmente en tu terminal para levantar la infraestructura del proyecto.
 
-Docker
+**Orden de ejecución recomendado:**
+1. `2.1` → Crear repositorio y .gitignore
+2. `2.2` → Configurar entorno Python
+3. `2.3` → Crear `pyproject.toml` con dependencias
+4. `2.4` → Crear estructura de carpetas
+5. `2.5` → Crear archivos de configuración (.env, config.py)
+6. `2.6` → Crear Dockerfile
+7. `2.7` → Crear docker-compose.yml
+8. `2.8` → Crear Nginx config
+9. `2.9` → Crear scripts de desarrollo (Makefile)
+10. `2.10` → Inicializar Alembic
+11. `2.11` → Verificar que todo funciona
 
-Servicios
+---
 
-Proporcioname todas las instrucciones, comandos, codigo si es necesario en esta fase, no hagas ninguna implementacion por tu cuenta, cualquier cosa de esta fase proporcioname todo a mi que yo lo hago por favor. 
+## 2.1 REPOSITORIO Y GIT
+
+### Paso 1: Inicializar git (si no lo hiciste ya)
+
+```bash
+# Desde la raíz del proyecto
+git init
+git branch -M master
+```
+
+### Paso 2: Crear .gitignore
+
+Crea el archivo `.gitignore` en la raíz con este contenido exacto:
+
+```
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Environment
+.env
+.venv/
+venv/
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Model files (too large for git)
+models/
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Alembic
+src/db/migrations/versions/*.pyc
+
+# Qdrant storage (local dev)
+qdrant_storage/
+
+# Postgres data (local dev)
+pgdata/
+```
+
+---
+
+## 2.2 ENTORNO PYTHON
+
+### Paso 3: Crear y activar el entorno virtual
+
+```bash
+# Windows (PowerShell 7+)
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+
+# Linux/Mac
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+### Paso 4: Instalar UV (gestor de paquetes ultra-rápido)
+
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Linux/Mac
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+---
+
+## 2.3 DEPENDENCIAS (pyproject.toml)
+
+### Paso 5: Crear pyproject.toml
+
+Crea `pyproject.toml` en la raíz. Este archivo reemplaza a `requirements.txt` y define todo el proyecto:
+
+```toml
+[project]
+name = "telegram-ai-bot"
+version = "0.1.0"
+description = "Asistente de IA para Telegram con memoria, RAG y personalidad configurable"
+requires-python = ">=3.13"
+readme = "README.md"
+
+dependencies = [
+    # API
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # Bot
+    "aiogram>=3.14.0",
+
+    # DB
+    "sqlalchemy[asyncio]>=2.0.36",
+    "alembic>=1.14.0",
+    "asyncpg>=0.30.0",
+
+    # Cache / Queue
+    "redis[hiredis]>=5.2.0",
+
+    # Vectores
+    "qdrant-client>=1.12.0",
+
+    # IA
+    "sentence-transformers>=3.3.0",
+    "torch>=2.5.0",
+
+    # HTTP
+    "httpx>=0.28.0",
+
+    # Utilidades
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "structlog>=24.4.0",
+    "python-multipart>=0.0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
+    "ngrok>=1.2.0",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+```
+
+### Paso 6: Instalar dependencias
+
+```bash
+# Con UV (recomendado)
+uv sync
+
+# Con pip tradicional
+pip install -e .
+pip install -e ".[dev]"
+```
+
+---
+
+## 2.4 ESTRUCTURA DE CARPETAS
+
+### Paso 7: Crear toda la estructura del proyecto
+
+Ejecuta estos comandos para crear todos los directorios necesarios:
+
+```bash
+# Directorios principales
+mkdir -p src/api
+mkdir -p src/bot/middlewares
+mkdir -p src/bot/filters
+mkdir -p src/bot/handlers
+mkdir -p src/services
+mkdir -p src/models
+mkdir -p src/db/models
+mkdir -p src/db/migrations/versions
+mkdir -p src/vector
+mkdir -p src/cache
+mkdir -p src/core
+mkdir -p tests/unit
+mkdir -p tests/integration
+mkdir -p docker/nginx
+```
+
+### Paso 8: Crear archivos __init__.py
+
+Cada directorio de Python necesita un `__init__.py`. Crea todos con este comando:
+
+```bash
+# Crea __init__.py en cada subdirectorio de src/
+New-Item -ItemType File -Path "src/api/__init__.py"
+New-Item -ItemType File -Path "src/bot/__init__.py"
+New-Item -ItemType File -Path "src/bot/middlewares/__init__.py"
+New-Item -ItemType File -Path "src/bot/filters/__init__.py"
+New-Item -ItemType File -Path "src/bot/handlers/__init__.py"
+New-Item -ItemType File -Path "src/services/__init__.py"
+New-Item -ItemType File -Path "src/models/__init__.py"
+New-Item -ItemType File -Path "src/db/__init__.py"
+New-Item -ItemType File -Path "src/db/models/__init__.py"
+New-Item -ItemType File -Path "src/vector/__init__.py"
+New-Item -ItemType File -Path "src/cache/__init__.py"
+New-Item -ItemType File -Path "src/core/__init__.py"
+New-Item -ItemType File -Path "tests/__init__.py"
+New-Item -ItemType File -Path "tests/unit/__init__.py"
+New-Item -ItemType File -Path "tests/integration/__init__.py"
+```
+
+*(En Linux/Mac usa `touch` en lugar de `New-Item -ItemType File`)*
+
+---
+
+## 2.5 CONFIGURACIÓN
+
+### Paso 9: Crear .env.example
+
+Crea `.env.example` en la raíz:
+
+```bash
+# Telegram
+TELEGRAM_BOT_TOKEN=tu_token_aqui
+TELEGRAM_WEBHOOK_SECRET=secret_aleatorio_64_chars_min
+TELEGRAM_WEBHOOK_URL=https://tudominio.com/webhook
+
+# Base de datos
+DATABASE_URL=postgresql+asyncpg://botuser:botpass@postgres:5432/telegram_bot
+
+# Redis
+REDIS_URL=redis://:redispass@redis:6379/0
+
+# Qdrant
+QDRANT_URL=http://qdrant:6333
+QDRANT_GRPC_PORT=6334
+
+# vLLM
+VLLM_URL=http://vllm:8001/v1
+VLLM_MODEL_NAME=Qwen/Qwen2.5-7B-Instruct
+
+# Embeddings
+EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
+
+# Memoria
+MEMORY_WINDOW_SIZE=20
+
+# Rate limiting
+RATE_LIMIT_MSG_PER_MIN=10
+
+# Logging
+LOG_LEVEL=INFO
+
+# Sentry (opcional)
+SENTRY_DSN=
+
+# Búsqueda web (opcional)
+SEARCH_API_KEY=
+SEARCH_API_URL=
+
+# Entorno
+ENVIRONMENT=development
+```
+
+Luego cópialo a `.env` para desarrollo:
+
+```bash
+Copy-Item .env.example .env   # Windows PowerShell
+# cp .env.example .env        # Linux/Mac
+```
+
+### Paso 10: Crear módulo de configuración central
+
+Crea `src/core/config.py` — este archivo carga toda la config desde variables de entorno usando Pydantic Settings:
+
+```python
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
+
+    # Telegram
+    telegram_bot_token: str
+    telegram_webhook_secret: str
+    telegram_webhook_url: str = ""
+
+    # Database
+    database_url: str = "postgresql+asyncpg://botuser:botpass@postgres:5432/telegram_bot"
+
+    # Redis
+    redis_url: str = "redis://:redispass@redis:6379/0"
+
+    # Qdrant
+    qdrant_url: str = "http://qdrant:6333"
+    qdrant_grpc_port: int = 6334
+
+    # vLLM
+    vllm_url: str = "http://vllm:8001/v1"
+    vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+
+    # Embeddings
+    embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+
+    # Memory
+    memory_window_size: int = 20
+
+    # Rate limiting
+    rate_limit_msg_per_min: int = 10
+
+    # Logging
+    log_level: str = "INFO"
+
+    # Sentry
+    sentry_dsn: str = ""
+
+    # Search
+    search_api_key: str = ""
+    search_api_url: str = ""
+
+    # Environment
+    environment: str = "development"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
+
+
+settings = Settings()
+```
+
+---
+
+## 2.6 DOCKERFILE
+
+### Paso 11: Crear Dockerfile
+
+Crea `docker/Dockerfile`:
+
+```dockerfile
+FROM python:3.13-slim AS base
+
+# Instalar uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Configurar Python
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
+
+# Copiar dependencias primero (cache layer)
+COPY pyproject.toml .
+RUN uv sync --frozen --no-dev
+
+# Copiar código fuente
+COPY src/ src/
+
+EXPOSE 8000
+
+CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+# --- Etapa de desarrollo (con hot reload) ---
+FROM base AS dev
+
+RUN uv sync --frozen
+
+CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+```
+
+---
+
+## 2.7 DOCKER COMPOSE
+
+### Paso 12: Crear docker-compose.yml
+
+Crea `docker/docker-compose.yml`:
+
+```yaml
+services:
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+    container_name: telegram-bot-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: telegram-bot-postgres
+    environment:
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: botpass
+      POSTGRES_DB: telegram_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser -d telegram_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-bot-redis
+    command: redis-server --requirepass redispass --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: telegram-bot-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+    restart: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: telegram-bot-vllm
+    ports:
+      - "8001:8001"
+    volumes:
+      - vllm_models:/root/.cache/huggingface
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ""  # Opcional para modelos gated
+    command:
+      - "--model"
+      - "Qwen/Qwen2.5-7B-Instruct"
+      - "--port"
+      - "8001"
+      - "--max-model-len"
+      - "8192"
+      - "--gpu-memory-utilization"
+      - "0.90"
+      - "--trust-remote-code"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - internal
+    restart: unless-stopped
+    # Comentar la sección 'deploy' si no tienes GPU
+
+  nginx:
+    image: nginx:alpine
+    container_name: telegram-bot-nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - internal
+    restart: unless-stopped
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  vllm_models:
+
+networks:
+  internal:
+    driver: bridge
+```
+
+---
+
+## 2.8 NGINX (Producción)
+
+### Paso 13: Crear configuración de Nginx
+
+Crea `docker/nginx/nginx.conf`:
+
+```nginx
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream api {
+        server api:8000;
+    }
+
+    # Limitar tamaño de body (Telegram max ~50MB para documentos)
+    client_max_body_size 50M;
+
+    # HTTP → HTTPS redirect
+    server {
+        listen 80;
+        server_name tudominio.com;
+        return 301 https://$host$request_uri;
+    }
+
+    # HTTPS
+    server {
+        listen 443 ssl http2;
+        server_name tudominio.com;
+
+        ssl_certificate /etc/nginx/ssl/fullchain.pem;
+        ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers HIGH:!aNULL:!MD5;
+
+        # Rate limiting
+        limit_req_zone $binary_remote_addr zone=webhook:10m rate=10r/s;
+        limit_req zone=webhook burst=20 nodelay;
+
+        # Health check (sin rate limit)
+        location /health {
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        location /ready {
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+
+        # Webhook endpoint (con rate limit)
+        location /webhook {
+            limit_req zone=webhook burst=20 nodelay;
+            proxy_pass http://api;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            # Timeout más largo para respuestas de IA
+            proxy_read_timeout 120s;
+            proxy_send_timeout 60s;
+        }
+
+        # Métricas (solo acceso interno)
+        location /metrics {
+            allow 127.0.0.1;
+            deny all;
+            proxy_pass http://api;
+        }
+    }
+}
+```
+
+### Paso 14: Preparar SSL (producción)
+
+```bash
+# Crear directorio para SSL
+mkdir -p docker/nginx/ssl
+
+# Si tienes dominio con Let's Encrypt:
+# sudo apt install certbot
+# sudo certbot certonly --standalone -d tudominio.com
+# Copiar certificados:
+# Copy-Item C:\Certbot\...\fullchain.pem docker/nginx/ssl/
+# Copy-Item C:\Certbot\...\privkey.pem docker/nginx/ssl/
+
+# Para desarrollo local (sin HTTPS real), puedes:
+# 1. Usar ngrok para exponer tu localhost
+# 2. O configurar webhook sin Nginx (solo api directo)
+```
+
+---
+
+## 2.9 SCRIPTS DE DESARROLLO
+
+### Paso 15: Crear Makefile (comandos útiles)
+
+Crea `Makefile` en la raíz:
+
+```makefile
+.PHONY: help install dev lint typecheck test clean docker-up docker-down
+
+help:  ## Muestra esta ayuda
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+	awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install:  ## Instala dependencias
+	uv sync
+
+dev:  ## Inicia servidor en modo desarrollo
+	uv run uvicorn src.main:app --reload --port 8000
+
+lint:  ## Ejecuta linter (ruff)
+	uv run ruff check src/
+
+lint-fix:  ## Corrige errores automáticamente
+	uv run ruff check --fix src/
+
+typecheck:  ## Verifica tipos (mypy)
+	uv run mypy src/
+
+test:  ## Ejecuta tests
+	uv run pytest tests/ -v
+
+test-cov:  ## Ejecuta tests con cobertura
+	uv run pytest tests/ --cov=src --cov-report=term-missing
+
+clean:  ## Limpia archivos temporales
+	rm -rf __pycache__ .pytest_cache .ruff_cache
+	rm -rf src/**/__pycache__
+
+docker-up:  ## Levanta servicios Docker (sin GPU)
+	docker compose -f docker/docker-compose.yml up -d
+
+docker-up-gpu:  ## Levanta servicios Docker (con GPU)
+	docker compose -f docker/docker-compose.yml up -d vllm api postgres redis qdrant
+
+docker-down:  ## Detiene servicios Docker
+	docker compose -f docker/docker-compose.yml down
+
+docker-logs:  ## Muestra logs de Docker
+	docker compose -f docker/docker-compose.yml logs -f
+
+db-migrate:  ## Crea nueva migración
+	uv run alembic revision --autogenerate -m "$(message)"
+
+db-upgrade:  ## Aplica migraciones
+	uv run alembic upgrade head
+
+db-downgrade:  ## Revierte última migración
+	uv run alembic downgrade -1
+```
+
+---
+
+## 2.10 ALEMBIC (MIGRACIONES)
+
+### Paso 16: Inicializar Alembic
+
+```bash
+# Desde la raíz del proyecto
+cd src/db
+alembic init migrations
+cd ../..
+```
+
+### Paso 17: Configurar alembic.ini
+
+Edita `src/db/alembic.ini` y cambia la línea de sqlalchemy.url:
+
+```ini
+# Antes:
+# sqlalchemy.url = driver://user:pass@localhost/dbname
+
+# Después:
+sqlalchemy.url = postgresql+asyncpg://botuser:botpass@localhost:5432/telegram_bot
+```
+
+> **Nota:** Para desarrollo local sin Docker, instala PostgreSQL local o usa este connection string. Para Docker, el valor real viene del .env y se sobreescribe en `env.py`.
+
+### Paso 18: Configurar env.py de Alembic
+
+Edita `src/db/migrations/env.py`:
+
+```python
+import asyncio
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from src.core.config import settings
+from src.db.models import Base  # <- se creará en Fase 3
+
+config = context.config
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+
+def run_migrations_offline() -> None:
+    url = settings.database_url
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def do_run_migrations(connection):
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    connectable = create_async_engine(settings.database_url)
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    asyncio.run(run_async_migrations())
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+```
+
+---
+
+## 2.11 ENTRY POINT
+
+### Paso 19: Crear main.py
+
+Crea `src/main.py` — es el punto de entrada de la aplicación:
+
+```python
+import structlog
+
+from src.api.app import create_app
+from src.core.config import settings
+
+logger = structlog.get_logger()
+
+
+def main():
+    app = create_app()
+    logger.info(
+        "Starting application",
+        environment=settings.environment,
+        log_level=settings.log_level,
+    )
+    return app
+
+
+app = main()
+```
+
+### Paso 20: Crear app FastAPI
+
+Crea `src/api/app.py`:
+
+```python
+from contextlib import asynccontextmanager
+
+import structlog
+from fastapi import FastAPI
+
+from src.api.health import router as health_router
+from src.api.webhook import router as webhook_router
+from src.core.config import settings
+
+logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Maneja startup y shutdown de la aplicación."""
+    logger.info("Application startup")
+    # Aquí se inicializarán: DB pool, Redis, Qdrant, Aiogram, etc.
+    yield
+    # Aquí se cerrarán conexiones
+    logger.info("Application shutdown")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Telegram AI Bot",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.is_development else None,
+        redoc_url="/redoc" if settings.is_development else None,
+    )
+
+    # Rutas
+    app.include_router(health_router)
+    app.include_router(webhook_router)
+
+    return app
+```
+
+### Paso 21: Crear health endpoint
+
+Crea `src/api/health.py`:
+
+```python
+from fastapi import APIRouter
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/health")
+async def health():
+    return {"status": "ok", "service": "telegram-ai-bot"}
+
+
+@router.get("/ready")
+async def ready():
+    # En el futuro: verificar DB, Redis, Qdrant
+    return {"status": "ready"}
+```
+
+### Paso 22: Crear webhook endpoint (placeholder)
+
+Crea `src/api/webhook.py`:
+
+```python
+import hmac
+
+import structlog
+from fastapi import APIRouter, Request
+
+from src.core.config import settings
+
+logger = structlog.get_logger()
+router = APIRouter(tags=["webhook"])
+
+
+def verify_webhook(secret: str, payload: bytes, signature: str) -> bool:
+    """Verifica que el webhook venga de Telegram."""
+    expected = hmac.new(
+        secret.encode(), payload, "sha256"
+    ).hexdigest()
+    return hmac.compare_digest(f"sha256={expected}", signature)
+
+
+@router.post("/webhook")
+async def webhook(request: Request):
+    """Recibe updates de Telegram."""
+    # Verificar firma (producción)
+    # signature = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    # body = await request.body()
+    # if not verify_webhook(settings.telegram_webhook_secret, body, signature):
+    #     return {"ok": False, "error": "invalid signature"}
+
+    update_data = await request.json()
+    logger.info("Webhook received", update_id=update_data.get("update_id"))
+
+    # TODO: Pasar a Aiogram Dispatcher (Fase 4)
+
+    return {"ok": True}
+```
+
+---
+
+## 2.12 VERIFICACIÓN
+
+### Paso 23: Probar que todo funciona
+
+```bash
+# 1. Verificar que el código arranca
+uv run python -c "from src.core.config import settings; print(settings.model_dump())"
+
+# 2. Iniciar servidor de desarrollo
+uv run uvicorn src.main:app --reload --port 8000
+
+# 3. Probar health endpoint (en otra terminal)
+curl http://localhost:8000/health
+# Debería responder: {"status":"ok","service":"telegram-ai-bot"}
+
+# 4. Probar ready endpoint
+curl http://localhost:8000/ready
+# Debería responder: {"status":"ready"}
+
+# 5. Probar webhook (simulado)
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"update_id": 1, "message": {"text": "hola"}}'
+# Debería responder: {"ok": true}
+
+# 6. Lint
+uv run ruff check src/
+
+# 7. Type check
+uv run mypy src/
+
+# 8. Tests (aunque aún no hay)
+uv run pytest tests/ -v
+```
+
+### Paso 24: Levantar Docker (cuando todo lo anterior funcione)
+
+```bash
+# Desarrollo (sin GPU, sin Nginx)
+docker compose -f docker/docker-compose.yml up -d postgres redis qdrant api
+
+# Producción (con GPU, con Nginx)
+docker compose -f docker/docker-compose.yml --profile production up -d
+
+# Ver logs
+docker compose -f docker/docker-compose.yml logs -f api
+
+# Verificar contenedores
+docker compose -f docker/docker-compose.yml ps
+```
+
+---
+
+## 2.13 ESTRUCTURA FINAL DEL PROYECTO
+
+Después de ejecutar todos los pasos, tu proyecto debe verse así:
+
+```
+telegram-ai-bot/
+│
+├── .env                        # ← Creado en Paso 9
+├── .env.example                # ← Creado en Paso 9
+├── .gitignore                  # ← Creado en Paso 2
+├── .venv/                      # ← Creado en Paso 3
+├── Makefile                    # ← Creado en Paso 15
+├── pyproject.toml              # ← Creado en Paso 5
+│
+├── src/
+│   ├── main.py                 # ← Creado en Paso 19
+│   │
+│   ├── api/
+│   │   ├── __init__.py         # ← Creado en Paso 8
+│   │   ├── app.py              # ← Creado en Paso 20
+│   │   ├── health.py           # ← Creado en Paso 21
+│   │   └── webhook.py          # ← Creado en Paso 22
+│   │
+│   ├── bot/
+│   │   ├── __init__.py
+│   │   ├── middlewares/__init__.py
+│   │   ├── filters/__init__.py
+│   │   └── handlers/__init__.py
+│   │
+│   ├── services/__init__.py
+│   ├── models/__init__.py
+│   │
+│   ├── db/
+│   │   ├── __init__.py
+│   │   ├── session.py          # (se creará en Fase 3)
+│   │   ├── models/__init__.py
+│   │   └── migrations/         # ← Creado en Paso 16
+│   │       ├── alembic.ini     # ← Creado en Paso 17
+│   │       ├── env.py          # ← Creado en Paso 18
+│   │       └── versions/
+│   │
+│   ├── vector/__init__.py
+│   ├── cache/__init__.py
+│   └── core/
+│       ├── __init__.py
+│       └── config.py           # ← Creado en Paso 10
+│
+├── docker/
+│   ├── Dockerfile              # ← Creado en Paso 11
+│   ├── docker-compose.yml      # ← Creado en Paso 12
+│   └── nginx/
+│       └── nginx.conf          # ← Creado en Paso 13
+│
+└── tests/
+    ├── __init__.py
+    ├── unit/__init__.py
+    └── integration/__init__.py
+```
+
+---
+
+## 2.14 COMMIT INICIAL
+
+Cuando todo funcione, haz el primer commit:
+
+```bash
+git add .
+git commit -m "chore: initial project setup
+
+- Python 3.13+ with FastAPI + Aiogram
+- PostgreSQL + Redis + Qdrant + vLLM
+- Docker Compose for all services
+- Nginx with SSL termination
+- Makefile for common tasks
+- Pydantic Settings for configuration
+- Ruff + MyPy for code quality
+- Alembic for DB migrations"
+```
+
 
 FASE 3 - DISEÑO DE BASE DE DATOS
 Tabla Users

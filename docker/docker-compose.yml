@@ -1,0 +1,128 @@
+yaml services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+    container_name: telegram-bot-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks:
+      - internal
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: telegram-bot-postgres
+    environment:
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: botpass
+      POSTGRES_DB: telegram_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser -d telegram_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: telegram-bot-redis
+    command: redis-server --requirepass redispass --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 3s
+    networks:
+      - internal
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest 
+    container_name: telegram-bot-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+    restart: unless-stopped
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: telegram-bot-vllm
+    ports:
+      - "8001:8001"
+    volumes:
+      - vllm_model:/root/.cache/huggingface
+    environment:
+      HUGGING_FACE_HUB_TOKEN: "" # Opcional para modelos gated
+    command:
+      - "--model"
+      - "Qwen/Qwen2.5-7B-Instruct"
+      - "--port"
+      - "8001"
+      - "--max-model-len"
+      - "8192"
+      - "--gpu-memory-utilization"
+      - "0.90"
+      - "--trust-remote-code"
+     #  deploy:
+      # resources:
+        # devices:
+          # - driver: nvidia
+            # count: 1
+            # capabilities: [gpu] 
+    networks:
+      - internal
+    restart: unless-stopped
+    # Comentar la seccion deploy si no tengo GPU
+
+  nginx:
+    image: nginx:alpine
+    container_name: telegram-bot-nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - internal
+    restart: unless-stopped
+    profiles:
+      - production
+  
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  vllm_data:
+
+networks:
+  internal:
+    driver: bridge

@@ -1,0 +1,67 @@
+[project]
+name = "telegram-ai-bot"
+version = "0.1.0"
+description = "Asistente de AI para Telegram con memoria, RAG y personalidad configurable"
+requires-python = ">=3.13"
+readme = "README.md"
+
+dependencies = [
+    # API
+    "fastapi >= 0.115.0",
+    "uvicorn[standard] >= 0.32.0",
+
+    # Bot
+    "aiogram >= 3.14.0",
+
+    # DB
+    "sqlalchemy[asyncio] >= 2.0.36",
+    "alembic >= 1.14.0",
+    "asyncpg >= 0.30.0",
+
+    # Cache / Queue
+    "redis[hiredis] >= 5.2.0",
+
+    # Vectores
+    "qdrant-client >= 1.12.0",
+
+    # IA
+    "sentence-transformers >= 3.3.0",
+    "torch >= 2.5.0",
+
+    # HTTP
+    "httpx >= 0.28.0",
+
+    # Utilidades
+    "pydantic >= 2.10.0",
+    "pydantic-settings >= 2.6.0",
+    "python-dotenv >= 1.0.0",
+    "structlog >= 24.4.0",
+    "python-multipart >= 0.0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest >= 8.3.0",
+    "pytest-asyncio >= 0.24.0",
+    "pytest-cov >= 6.0.0",
+    "ruff >= 0.7.0",
+    "mypy >= 1.13.0",
+    "pre-commit >= 4.0.0",
+    "ngrok >= 1.2.0",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

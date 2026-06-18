@@ -1,1 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+
+# Environment
+.env
 .venv/
+venv/
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Model files (muy grandes para git)
+models/
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Alembic
+src/db/migrations/versions/*.pyc
+
+# Qdrant storage (local dev)
+qdrant_storage/
+
+# Postgres data (local dev)
+pgdata/
