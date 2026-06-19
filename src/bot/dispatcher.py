@@ -4,6 +4,7 @@ from aiogram.enums import ParseMode
 
 from src.bot.handlers.commands import router as commands_router
 from src.bot.handlers.messages import router as messages_router
+from src.bot.handlers.personality import router as personality_router
 from src.bot.middlewares.auth import AuthMiddleware
 from src.bot.middlewares.context import ContextMiddleware
 from src.bot.middlewares.logging import LoggingMiddleware
@@ -22,5 +23,6 @@ def setup_dispatcher() -> None:
     dp.update.middleware(AuthMiddleware())
     dp.update.middleware(ContextMiddleware())
 
+    dp.include_router(personality_router)
     dp.include_router(commands_router)
     dp.include_router(messages_router)

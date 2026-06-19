@@ -12,7 +12,7 @@ async def start(message: Message) -> None:
         "Que tal todo?\n"
         "Comandos:\n"
         "/resumen - Resumir conversacion\n"
-        "/buscar - Buscar en internet\n"
+        "/buscar [consulta] - Buscar en internet\n"
         "/aprende - Aprender un documento\n"
         "/modo - Cambiar personalidad"
     )
@@ -25,7 +25,7 @@ async def help_command(message: Message) -> None:
         "/start - Iniciar bot\n"
         "/help - Mostar ayuda\n"
         "/resumen - Resumir ultimos mensajes\n"
-        "/buscar <consulta> - Buscar en internet\n"
+        "/buscar [consulta] - Buscar en internet"
         "/aprende - Subir documento para aprender\n"
-        "/modo - Cambiar personalidad"
+        "/modo [nombre] - Cambiar personalidad"
     )

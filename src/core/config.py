@@ -21,12 +21,19 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://qdrant:6333"
     qdrant_grpc_port: int = 6334
 
+    # Ollama
+    ollama_url: str = "http://localhost:11434"
+    ollama_model: str = "qwen2.5:7b"
+
     # vLLM
     vllm_url: str = "http://vllm:8001/v1"
     vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
 
     # Embeddings
     embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+
+    # Transformers (AI local)
+    transformers_model: str = "Qwen/Qwen2.5-0.5B-Instruct"
 
     # Memory
     memory_window_size: int = 20
