@@ -1,0 +1,1 @@
+{"update_id": 1, "message": {"message_id": 1, "date": 1000000, "text": "hola", "chat": {"id": 1, "type": "private"}, "from": {"id": 1, "is_bot": false, "first_name": "Test"}}}

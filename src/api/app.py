@@ -5,7 +5,8 @@ import structlog
 from fastapi import FastAPI
 
 from src.api.health import router as health_router
-from src.api.webhook import router as webhook_router
+from src.api.webhook import delete_webhook, router as webhook_router, set_webhook
+from src.bot.dispatcher import bot, setup_dispatcher
 from src.core.config import settings
 
 logger = structlog.get_logger()
@@ -14,9 +15,13 @@ logger = structlog.get_logger()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Inicio de la aplicacion.")
+    setup_dispatcher()
+    if settings.is_production:
+        await set_webhook()
     yield
+    if settings.is_production:
+        await delete_webhook()
     logger.info("Cierre de la aplicacion")
-
 
 def create_app() -> FastAPI:
     app = FastAPI(

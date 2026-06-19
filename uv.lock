@@ -2184,6 +2184,7 @@ dev = [
 [package.dev-dependencies]
 dev = [
     { name = "mypy" },
+    { name = "ngrok" },
     { name = "ruff" },
 ]
 
@@ -2218,6 +2219,7 @@ provides-extras = ["dev"]
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.1.0" },
+    { name = "ngrok", specifier = ">=1.7.0" },
     { name = "ruff", specifier = ">=0.15.17" },
 ]
 

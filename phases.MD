@@ -2760,41 +2760,744 @@ uv run python scripts/seed.py
 
 
 FASE 4 - BOT TELEGRAM
-Crear Bot
+========================
 
-Usar:
+## Instrucciones de uso
 
-BotFather
+Esta fase conecta Telegram con nuestra infraestructura usando Aiogram 3.x, middlewares, filtros y handlers.
 
-Telegram genera un token para acceder a la Bot API.
-Configurar Webhook
+**Orden de ejecución:**
+1. `4.1` → Crear bot en BotFather y configurar webhook
+2. `4.2` → Crear el dispatcher de Aiogram
+3. `4.3` → Implementar los 4 middlewares
+4. `4.4` → Implementar filtros (mención, comando)
+5. `4.5` → Implementar handlers (mensajes, comandos)
+6. `4.6` → Actualizar `src/api/webhook.py` para integrar Aiogram
+7. `4.7` → Actualizar `src/api/app.py` con lifespan del bot
+8. `4.8` → Crear cliente Redis (caché + rate limiting)
+9. `4.9` → Exponer webhook con ngrok (desarrollo)
+10. `4.10` → Verificar que todo funciona
 
-Telegram
-      ↓
-Webhook
-      ↓
-FastAPI
+---
 
-No usar polling en producción.
+## 4.1 CONFIGURAR BOT EN TELEGRAM
 
-Detectar menciones
+### Paso 1: Crear bot con BotFather
 
-Ejemplo:
+1. Abre Telegram y busca `@BotFather`
+2. Ejecuta: `/newbot`
+3. Nombre: `CustomPerezBot` (o el que quieras)
+4. Username: `TuBot_bot` (debe terminar en `bot`)
+5. BotFather te dará un **token**. Guárdalo.
 
-@MiBot
+### Paso 2: Actualizar .env con el token
 
-o
+```bash
+# Edita .env y pega tu token:
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklmNOPqrstUVwxyz
+TELEGRAM_WEBHOOK_SECRET=un_secreto_muy_largo_de_64_caracteres_minimo
+```
 
-respuesta al bot
+El `TELEGRAM_WEBHOOK_SECRET` es un string que solo tú y Telegram conocen. Genera uno:
 
-Middleware
+```bash
+# PowerShell
+$random = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 64 | % {[char]$_})
+Write-Output $random
+```
 
-Implementar:
+### Paso 3: Configurar webhook (después de tener ngrok o dominio)
 
-AuthMiddleware
-LoggingMiddleware
-RateLimitMiddleware
-ContextMiddleware
+Se hace al final, cuando el servidor esté corriendo (paso 4.9).
+
+---
+
+## 4.2 DISPATCHER DE AIOGRAM
+
+### Crear `src/bot/dispatcher.py`
+
+```python
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+
+from src.bot.filters.command import CommandFilter
+from src.bot.filters.mention import MentionFilter
+from src.bot.handlers.commands import router as commands_router
+from src.bot.handlers.messages import router as messages_router
+from src.bot.middlewares.auth import AuthMiddleware
+from src.bot.middlewares.context import ContextMiddleware
+from src.bot.middlewares.logging import LoggingMiddleware
+from src.bot.middlewares.rate_limit import RateLimitMiddleware
+from src.cache.rate_limiter import RateLimiter
+from src.core.config import settings
+
+bot = Bot(
+    token=settings.telegram_bot_token,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+)
+
+dp = Dispatcher()
+
+
+def setup_dispatcher() -> None:
+    # Middlewares (orden: primero en entrar, último en ejecutarse)
+    dp.update.middleware(LoggingMiddleware())
+    dp.update.middleware(AuthMiddleware())
+    dp.update.middleware(RateLimitMiddleware(RateLimiter()))
+    dp.update.middleware(ContextMiddleware())
+
+    # Filtros
+    dp.message.register(commands_router.message, CommandFilter())
+    dp.message.register(messages_router.message, MentionFilter())
+    dp.message.register(messages_router.message)
+
+    # Incluir routers
+    dp.include_router(commands_router)
+    dp.include_router(messages_router)
+```
+
+---
+
+## 4.3 MIDDLEWARES
+
+### Crear `src/bot/middlewares/auth.py`
+
+```python
+from collections.abc import Awaitable, Callable
+
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject, User as TelegramUser
+
+from src.db.models.user import User
+from src.db.session import async_session_factory
+
+
+class AuthMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, object]], Awaitable[object]],
+        event: TelegramObject,
+        data: dict[str, object],
+    ) -> object:
+        telegram_user: TelegramUser | None = data.get("event_from_user")
+        if telegram_user and not telegram_user.is_bot:
+            async with async_session_factory() as session:
+                from sqlalchemy import select
+
+                result = await session.execute(
+                    select(User).where(User.telegram_id == telegram_user.id)
+                )
+                user = result.scalar_one_or_none()
+                if user is None:
+                    user = User(
+                        telegram_id=telegram_user.id,
+                        username=telegram_user.username,
+                        first_name=telegram_user.first_name,
+                        language=telegram_user.language_code or "es",
+                    )
+                    session.add(user)
+                    await session.commit()
+                    await session.refresh(user)
+                data["user"] = user
+        return await handler(event, data)
+```
+
+### Crear `src/bot/middlewares/logging.py`
+
+```python
+from collections.abc import Awaitable, Callable
+
+import structlog
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+
+logger = structlog.get_logger()
+
+
+class LoggingMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, object]], Awaitable[object]],
+        event: TelegramObject,
+        data: dict[str, object],
+    ) -> object:
+        update = data.get("event_update")
+        user = data.get("event_from_user")
+        if update:
+            logger.info(
+                "Update received",
+                update_id=update.update_id,
+                user_id=user.id if user else None,
+                username=user.username if user else None,
+            )
+        return await handler(event, data)
+```
+
+### Crear `src/bot/middlewares/rate_limit.py`
+
+```python
+from collections.abc import Awaitable, Callable
+
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject
+
+from src.cache.rate_limiter import RateLimiter
+
+
+class RateLimitMiddleware(BaseMiddleware):
+    def __init__(self, rate_limiter: RateLimiter) -> None:
+        self.rate_limiter = rate_limiter
+
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, object]], Awaitable[object]],
+        event: TelegramObject,
+        data: dict[str, object],
+    ) -> object:
+        user = data.get("event_from_user")
+        if user:
+            allowed = await self.rate_limiter.check(str(user.id))
+            if not allowed:
+                from aiogram.types import Message
+
+                if isinstance(event, Message):
+                    await event.answer("⏳ Demasiadas solicitudes. Espera un momento.")
+                return None
+        return await handler(event, data)
+```
+
+### Crear `src/bot/middlewares/context.py`
+
+```python
+from collections.abc import Awaitable, Callable
+
+from aiogram import BaseMiddleware
+from aiogram.types import TelegramObject, Chat as TelegramChat
+
+from src.db.models.chat import Chat
+from src.db.session import async_session_factory
+
+
+class ContextMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, object]], Awaitable[object]],
+        event: TelegramObject,
+        data: dict[str, object],
+    ) -> object:
+        telegram_chat: TelegramChat | None = data.get("event_chat")
+        if telegram_chat:
+            async with async_session_factory() as session:
+                from sqlalchemy import select
+
+                result = await session.execute(
+                    select(Chat).where(Chat.telegram_chat_id == telegram_chat.id)
+                )
+                chat = result.scalar_one_or_none()
+                if chat is None:
+                    chat = Chat(
+                        telegram_chat_id=telegram_chat.id,
+                        chat_type=telegram_chat.type,
+                        title=telegram_chat.title,
+                    )
+                    session.add(chat)
+                    await session.commit()
+                    await session.refresh(chat)
+                data["chat"] = chat
+        return await handler(event, data)
+```
+
+---
+
+## 4.4 FILTROS
+
+### Crear `src/bot/filters/__init__.py`
+
+```python
+from src.bot.filters.command import CommandFilter
+from src.bot.filters.mention import MentionFilter
+
+__all__ = ["CommandFilter", "MentionFilter"]
+```
+
+### Crear `src/bot/filters/mention.py`
+
+```python
+from aiogram.filters import BaseFilter
+from aiogram.types import Message
+
+
+class MentionFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        if not message.text:
+            return False
+        bot = message.bot
+        if bot is None:
+            return False
+        bot_username = (await bot.me()).username
+        if bot_username is None:
+            return False
+        # Detecta @botusername al inicio, medio, o reply al bot
+        if f"@{bot_username}" in message.text:
+            return True
+        if message.reply_to_message and message.reply_to_message.from_user:
+            return message.reply_to_message.from_user.id == bot.id
+        return False
+```
+
+### Crear `src/bot/filters/command.py`
+
+```python
+from aiogram.filters import BaseFilter
+from aiogram.types import Message
+
+
+COMMANDS = {"/start", "/help", "/resumen", "/buscar", "/aprende", "/modo", "/personalidad"}
+
+
+class CommandFilter(BaseFilter):
+    async def __call__(self, message: Message) -> bool:
+        if not message.text:
+            return False
+        command = message.text.split()[0].lower()
+        return command in COMMANDS
+```
+
+---
+
+## 4.5 HANDLERS
+
+### Crear `src/bot/handlers/__init__.py`
+
+```python
+```
+
+### Crear `src/bot/handlers/commands.py`
+
+```python
+from aiogram import Router
+from aiogram.types import Message
+
+router = Router()
+
+
+@router.message()
+async def start(message: Message) -> None:
+    if message.text and message.text.startswith("/start"):
+        await message.answer(
+            "¡Hola! Soy tu asistente con IA.\n\n"
+            "Puedes hablarme directamente o usar comandos:\n"
+            "/resumen - Resumir conversación\n"
+            "/buscar - Buscar en internet\n"
+            "/aprende - Aprender un documento\n"
+            "/modo - Cambiar personalidad"
+        )
+
+
+@router.message()
+async def help_command(message: Message) -> None:
+    if message.text and message.text.startswith("/help"):
+        await message.answer(
+            "Comandos disponibles:\n\n"
+            "/start - Iniciar bot\n"
+            "/help - Mostrar ayuda\n"
+            "/resumen - Resumir últimos mensajes\n"
+            "/buscar <consulta> - Buscar en internet\n"
+            "/aprende - Subir documento para aprender\n"
+            "/modo <nombre> - Cambiar personalidad"
+        )
+
+
+@router.message()
+async def unknown_command(message: Message) -> None:
+    if message.text and message.text.startswith("/"):
+        await message.answer("❌ Comando no reconocido. Usa /help para ver los disponibles.")
+```
+
+### Crear `src/bot/handlers/messages.py`
+
+```python
+from aiogram import Router
+from aiogram.types import Message
+from aiogram.types import User as TelegramUser
+
+from src.db.models.chat import Chat
+from src.db.models.user import User
+
+router = Router()
+
+
+@router.message()
+async def handle_message(
+    message: Message,
+    user: User | None = None,
+    chat: Chat | None = None,
+) -> None:
+    if not message.text:
+        return
+
+    telegram_user: TelegramUser | None = message.from_user
+    user_display = telegram_user.first_name if telegram_user else "Usuario"
+
+    # Por ahora, respuesta espejo (se conectará al LLM en Fase 5)
+    response = (
+        f"👋 Hola {user_display}! Tu mensaje fue recibido.\n\n"
+        f"Has dicho: _{message.text}_\n\n"
+        "⚠️ El motor de IA aún no está conectado."
+    )
+
+    await message.answer(response)
+```
+
+---
+
+## 4.6 WEBHOOK (Integración Aiogram + FastAPI)
+
+### Actualizar `src/api/webhook.py`
+
+```python
+import structlog
+from aiogram.types import Update
+from fastapi import APIRouter, Request
+
+from src.bot.dispatcher import bot, dp
+from src.core.config import settings
+
+logger = structlog.get_logger()
+router = APIRouter(tags=["webhook"])
+
+
+async def set_webhook() -> None:
+    if settings.telegram_webhook_url:
+        await bot.set_webhook(
+            url=f"{settings.telegram_webhook_url}/webhook",
+            secret_token=settings.telegram_webhook_secret,
+            drop_pending_updates=True,
+        )
+        logger.info("Webhook set", url=settings.telegram_webhook_url)
+
+
+async def delete_webhook() -> None:
+    await bot.delete_webhook(drop_pending_updates=True)
+    logger.info("Webhook deleted")
+
+
+@router.post("/webhook")
+async def webhook(request: Request) -> dict[str, bool | str]:
+    token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+
+    if token != settings.telegram_webhook_secret:
+        logger.warning("Invalid webhook secret token")
+        return {"ok": False, "error": "invalid secret token"}
+
+    body = await request.json()
+    update = Update.model_validate(body)
+    await dp.feed_update(bot=bot, update=update)
+    return {"ok": True}
+```
+
+---
+
+## 4.7 LIFESPAN (Integración bot + FastAPI)
+
+### Actualizar `src/api/app.py`
+
+```python
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+import structlog
+from fastapi import FastAPI
+
+from src.api.health import router as health_router
+from src.api.webhook import delete_webhook, router as webhook_router, set_webhook
+from src.bot.dispatcher import bot, setup_dispatcher
+from src.core.config import settings
+
+logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    logger.info("Starting bot")
+    setup_dispatcher()
+    if settings.is_production:
+        await set_webhook()
+    yield
+    if settings.is_production:
+        await delete_webhook()
+    await bot.session.close()
+    logger.info("Bot stopped")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Telegram AI Bot",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if settings.is_development else None,
+        redoc_url="/redoc" if settings.is_development else None,
+    )
+
+    app.include_router(health_router)
+    app.include_router(webhook_router)
+
+    return app
+```
+
+---
+
+## 4.8 CACHE / RATE LIMITER (Redis)
+
+### Crear `src/cache/client.py`
+
+```python
+from redis.asyncio import Redis
+
+from src.core.config import settings
+
+redis_client: Redis | None = None
+
+
+async def get_redis() -> Redis:
+    global redis_client
+    if redis_client is None:
+        redis_client = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+        )
+    return redis_client
+
+
+async def close_redis() -> None:
+    global redis_client
+    if redis_client:
+        await redis_client.aclose()
+        redis_client = None
+```
+
+### Crear `src/cache/rate_limiter.py`
+
+```python
+import time
+
+from src.cache.client import get_redis
+from src.core.config import settings
+
+
+class RateLimiter:
+    def __init__(self, max_requests: int = 1, window: int = 1) -> None:
+        self.max_requests = max_requests
+        self.window = window
+
+    async def check(self, user_id: str) -> bool:
+        client = await get_redis()
+        key = f"ratelimit:{user_id}"
+        now = time.time()
+        window_start = now - self.window
+
+        await client.zremrangebyscore(key, 0, window_start)
+        request_count = await client.zcard(key)
+
+        if request_count >= self.max_requests:
+            return False
+
+        await client.zadd(key, {str(now): now})
+        await client.expire(key, self.window)
+        return True
+```
+
+---
+
+## 4.9 NGROK (Desarrollo local)
+
+### Paso 1: Instalar ngrok
+
+```bash
+# Opción 1: Usar el que viene en dev-dependencies
+uv run ngrok --version
+
+# Opción 2: Descargar de https://ngrok.com/download
+# O con winget:
+winget install ngrok
+```
+
+### Paso 2: Exponer el servidor local
+
+```bash
+# Terminal 1: Iniciar FastAPI
+uv run uvicorn src.main:app --reload --port 8000
+
+# Terminal 2: Exponer con ngrok
+ngrok http 8000
+```
+
+### Paso 3: Configurar webhook
+
+ngrok te dará una URL como `https://abc123.ngrok-free.app`. Con esa URL, actualiza `.env`:
+
+```bash
+TELEGRAM_WEBHOOK_URL=https://abc123.ngrok-free.app
+```
+
+### Paso 4: Registrar webhook en Telegram
+
+```bash
+# PowerShell (desde raíz del proyecto)
+uv run python -c "
+import asyncio
+from src.bot.dispatcher import bot
+from src.core.config import settings
+
+async def main():
+    url = f'{settings.telegram_webhook_url}/webhook'
+    await bot.set_webhook(
+        url=url,
+        secret_token=settings.telegram_webhook_secret,
+        drop_pending_updates=True,
+    )
+    info = await bot.get_webhook_info()
+    print(f'Webhook URL: {info.url}')
+    print(f'Pending updates: {info.pending_update_count}')
+
+asyncio.run(main())
+"
+```
+
+### Paso 5: Verificar webhook
+
+```bash
+uv run python -c "
+import asyncio
+from src.bot.dispatcher import bot
+
+async def main():
+    info = await bot.get_webhook_info()
+    print(f'URL: {info.url}')
+    print(f'Has custom secret: {info.secret_token is not None}')
+    print(f'Pending: {info.pending_update_count}')
+
+asyncio.run(main())
+"
+```
+
+---
+
+## 4.10 VERIFICACIÓN
+
+### Prueba 1: importar todo sin errores
+
+```bash
+uv run python -c "
+from src.bot.dispatcher import bot, dp, setup_dispatcher
+print('✓ Dispatcher importado')
+setup_dispatcher()
+print('✓ Dispatcher configurado')
+print(f'Bot: {bot.__class__.__name__}')
+"
+```
+
+### Prueba 2: arrancar servidor y probar health
+
+```bash
+# Terminal 1
+uv run uvicorn src.main:app --reload --port 8000
+
+# Terminal 2
+curl http://localhost:8000/health
+# → {"status":"OK","service":"telegram-ai-bot"}
+
+curl http://localhost:8000/ready
+# → {"status":"ready"}
+```
+
+### Prueba 3: enviar update simulado
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Telegram-Bot-Api-Secret-Token: tu_secreto" \
+  -d '{"update_id": 1, "message": {"message_id": 1, "date": 1000000, "text": "hola", "chat": {"id": 1, "type": "private"}, "from": {"id": 1, "is_bot": false, "first_name": "Test"}}}'
+```
+
+### Prueba 4: ngrok + Telegram real
+
+```bash
+# 1. Iniciar servidor (Terminal 1)
+uv run uvicorn src.main:app --reload --port 8000
+
+# 2. Iniciar ngrok (Terminal 2)
+ngrok http 8000
+
+# 3. Copiar URL de ngrok a .env
+# TELEGRAM_WEBHOOK_URL=https://abc123.ngrok-free.app
+
+# 4. Ejecutar script de registro (Terminal 3)
+uv run python -c "
+import asyncio
+from src.bot.dispatcher import bot
+from src.core.config import settings
+
+async def main():
+    await bot.set_webhook(
+        url=f'{settings.telegram_webhook_url}/webhook',
+        secret_token=settings.telegram_webhook_secret,
+        drop_pending_updates=True,
+    )
+    info = await bot.get_webhook_info()
+    print(f'✓ Webhook: {info.url}')
+
+asyncio.run(main())
+"
+
+# 5. Envía un mensaje a tu bot desde Telegram
+```
+
+---
+
+## 4.11 DIAGRAMA DE FLUJO
+
+```
+TELEGRAM APP
+    │
+    │  Usuario envía: "@MiBot hola"
+    ▼
+TELEGRAM BOT API
+    │
+    │  POST /webhook (con secret_token)
+    ▼
+NGINX (producción) / NGROK (desarrollo)
+    │
+    ▼
+FASTAPI - /webhook
+    │
+    │  verify_webhook() → verificar HMAC
+    │  Update.model_validate_json() → parsear
+    │  dp.feed_update() → pasar a Aiogram
+    ▼
+AIOGRAM DISPATCHER
+    │
+    │  MIDDLEWARE STACK (orden):
+    │  1. LoggingMiddleware  → log update
+    │  2. AuthMiddleware     → crear/buscar User en DB
+    │  3. RateLimitMiddleware→ verificar Redis
+    │  4. ContextMiddleware  → crear/buscar Chat en DB
+    │
+    │  FILTROS:
+    │  - MentionFilter?      → ¿tiene @bot?
+    │  - CommandFilter?      → ¿empieza con /?
+    │
+    ▼
+HANDLER (commands / messages)
+    │
+    │  Procesar mensaje
+    │  (por ahora: respuesta espejo)
+    │  (Fase 5+: enviar a LLM)
+    ▼
+RESPUESTA A TELEGRAM
+```
+
 
 FASE 5 - MOTOR DE IA
 
